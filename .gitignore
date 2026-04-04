@@ -1,0 +1,67 @@
+# 🔹 Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 🔹 Virtual environment
+venv/
+.venv/
+env/
+ENV/
+tfenv/
+
+# 🔹 Environment variables 
+.env
+.env.*
+
+# 🔹 Build / distribution files
+build/
+dist/
+.dist/
+*.dist
+*.egg-info/
+.eggs/
+
+# 🔹 Logs
+*.log
+*.out
+*.err
+
+# 🔹 VS Code / IDE
+.vscode/
+.idea/
+
+# 🔹 OS files
+.DS_Store
+Thumbs.db
+
+# 🔹 Temporary files
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# 🔹 Streamlit cache
+.streamlit/
+
+# 🔹 Jupyter checkpoints
+.ipynb_checkpoints/
+
+# 🔹 Python tool caches
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# 🔹 Coverage files
+.coverage
+htmlcov/
+
+# 🔹 Generated CSV files (Vanna output)
+query_results_*.csv
+
+# 🔹 SQLite temp files
+*.db-journal
+*.sqlite3
+
+# 🔹 Random generated folder
+f8c88490871f6169/

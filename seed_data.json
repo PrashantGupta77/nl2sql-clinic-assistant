@@ -1,0 +1,134 @@
+[
+  {
+    "question": "How many patients do we have?",
+    "args": {
+      "sql": "SELECT COUNT(*) AS total_patients FROM patients;"
+    }
+  },
+  {
+    "question": "List all doctors and their specializations",
+    "args": {
+      "sql": "SELECT name, specialization FROM doctors ORDER BY name;"
+    }
+  },
+  {
+    "question": "Which city has the most patients?",
+    "args": {
+      "sql": "\n                    SELECT city, COUNT(*) AS patient_count\n                    FROM patients\n                    GROUP BY city\n                    ORDER BY patient_count DESC\n                    LIMIT 1;\n                "
+    }
+  },
+  {
+    "question": "Show patients by gender",
+    "args": {
+      "sql": "\n                    SELECT gender, COUNT(*) AS total_patients\n                    FROM patients\n                    GROUP BY gender\n                    ORDER BY total_patients DESC;\n                "
+    }
+  },
+  {
+    "question": "Show patient registration trend by month",
+    "args": {
+      "sql": "\n                    SELECT strftime('%Y-%m', registered_date) AS month,\n                           COUNT(*) AS registrations\n                    FROM patients\n                    GROUP BY month\n                    ORDER BY month;\n                "
+    }
+  },
+  {
+    "question": "Which doctor has the most appointments?",
+    "args": {
+      "sql": "\n                    SELECT d.name, COUNT(*) AS appointment_count\n                    FROM appointments a\n                    JOIN doctors d ON a.doctor_id = d.id\n                    GROUP BY d.id, d.name\n                    ORDER BY appointment_count DESC\n                    LIMIT 1;\n                "
+    }
+  },
+  {
+    "question": "Show appointments by status",
+    "args": {
+      "sql": "\n                    SELECT status, COUNT(*) AS total_appointments\n                    FROM appointments\n                    GROUP BY status\n                    ORDER BY total_appointments DESC;\n                "
+    }
+  },
+  {
+    "question": "Show me appointments for last month",
+    "args": {
+      "sql": "\n                    SELECT id, patient_id, doctor_id, appointment_date, status\n                    FROM appointments\n                    WHERE appointment_date >= date('now', 'start of month', '-1 month')\n                      AND appointment_date < date('now', 'start of month')\n                    ORDER BY appointment_date;\n                "
+    }
+  },
+  {
+    "question": "How many cancelled appointments last quarter?",
+    "args": {
+      "sql": "\n                    SELECT COUNT(*) AS cancelled_count\n                    FROM appointments\n                    WHERE status = 'Cancelled'\n                      AND appointment_date >= date('now', '-3 months');\n                "
+    }
+  },
+  {
+    "question": "Show monthly appointment count for the past 6 months",
+    "args": {
+      "sql": "\n                    SELECT strftime('%Y-%m', appointment_date) AS month,\n                           COUNT(*) AS total_appointments\n                    FROM appointments\n                    WHERE appointment_date >= date('now', '-6 months')\n                    GROUP BY month\n                    ORDER BY month;\n                "
+    }
+  },
+  {
+    "question": "Top 5 patients by spending",
+    "args": {
+      "sql": "\n                    SELECT p.first_name,\n                           p.last_name,\n                           SUM(i.total_amount) AS total_spending\n                    FROM invoices i\n                    JOIN patients p ON i.patient_id = p.id\n                    GROUP BY p.id, p.first_name, p.last_name\n                    ORDER BY total_spending DESC\n                    LIMIT 5;\n                "
+    }
+  },
+  {
+    "question": "What is the total revenue?",
+    "args": {
+      "sql": "SELECT SUM(total_amount) AS total_revenue FROM invoices;"
+    }
+  },
+  {
+    "question": "Show revenue by doctor",
+    "args": {
+      "sql": "\n                    SELECT d.name,\n                           SUM(i.total_amount) AS total_revenue\n                    FROM invoices i\n                    JOIN appointments a ON i.patient_id = a.patient_id\n                    JOIN doctors d ON a.doctor_id = d.id\n                    GROUP BY d.id, d.name\n                    ORDER BY total_revenue DESC;\n                "
+    }
+  },
+  {
+    "question": "Average treatment cost by specialization",
+    "args": {
+      "sql": "\n                    SELECT d.specialization,\n                           AVG(t.cost) AS avg_treatment_cost\n                    FROM treatments t\n                    JOIN appointments a ON t.appointment_id = a.id\n                    JOIN doctors d ON a.doctor_id = d.id\n                    GROUP BY d.specialization\n                    ORDER BY avg_treatment_cost DESC;\n                "
+    }
+  },
+  {
+    "question": "Show unpaid invoices",
+    "args": {
+      "sql": "\n                    SELECT id, patient_id, invoice_date, total_amount, paid_amount, status\n                    FROM invoices\n                    WHERE status IN ('Pending', 'Overdue')\n                    ORDER BY invoice_date DESC;\n                "
+    }
+  },
+  {
+    "question": "List patients with overdue invoices",
+    "args": {
+      "sql": "\n                    SELECT DISTINCT p.first_name, p.last_name, p.city\n                    FROM invoices i\n                    JOIN patients p ON i.patient_id = p.id\n                    WHERE i.status = 'Overdue'\n                    ORDER BY p.last_name, p.first_name;\n                "
+    }
+  },
+  {
+    "question": "Revenue trend by month",
+    "args": {
+      "sql": "\n                    SELECT strftime('%Y-%m', invoice_date) AS month,\n                           SUM(total_amount) AS total_revenue\n                    FROM invoices\n                    GROUP BY month\n                    ORDER BY month;\n                "
+    }
+  },
+  {
+    "question": "List patients who visited more than 3 times",
+    "args": {
+      "sql": "\n                    SELECT p.first_name,\n                           p.last_name,\n                           COUNT(a.id) AS visit_count\n                    FROM appointments a\n                    JOIN patients p ON a.patient_id = p.id\n                    GROUP BY p.id, p.first_name, p.last_name\n                    HAVING COUNT(a.id) > 3\n                    ORDER BY visit_count DESC;\n                "
+    }
+  },
+  {
+    "question": "What percentage of appointments are no-shows?",
+    "args": {
+      "sql": "\n                    SELECT ROUND(\n                        100.0 * SUM(CASE WHEN status = 'No-Show' THEN 1 ELSE 0 END) / COUNT(*),\n                        2\n                    ) AS no_show_percentage\n                    FROM appointments;\n                "
+    }
+  },
+  {
+    "question": "Compare revenue between departments",
+    "args": {
+      "sql": "\n                    SELECT d.department,\n                           SUM(i.total_amount) AS total_revenue\n                    FROM invoices i\n                    JOIN appointments a ON i.patient_id = a.patient_id\n                    JOIN doctors d ON a.doctor_id = d.id\n                    GROUP BY d.department\n                    ORDER BY total_revenue DESC;\n                "
+    }
+  },
+  {
+    "question": "Show the busiest day of the week for appointments",
+    "args": {
+      "sql": "\n                    SELECT CASE strftime('%w', appointment_date)\n                               WHEN '0' THEN 'Sunday'\n                               WHEN '1' THEN 'Monday'\n                               WHEN '2' THEN 'Tuesday'\n                               WHEN '3' THEN 'Wednesday'\n                               WHEN '4' THEN 'Thursday'\n                               WHEN '5' THEN 'Friday'\n                               WHEN '6' THEN 'Saturday'\n                           END AS weekday,\n                           COUNT(*) AS total_appointments\n                    FROM appointments\n                    GROUP BY weekday\n                    ORDER BY total_appointments DESC\n                    LIMIT 1;\n                "
+    }
+  },
+  {
+    "question": "Average appointment duration by doctor",
+    "args": {
+      "sql": "\n                    SELECT d.name,\n                           AVG(t.duration_minutes) AS avg_duration_minutes\n                    FROM treatments t\n                    JOIN appointments a ON t.appointment_id = a.id\n                    JOIN doctors d ON a.doctor_id = d.id\n                    GROUP BY d.id, d.name\n                    ORDER BY avg_duration_minutes DESC;\n                "
+    }
+  }
+]

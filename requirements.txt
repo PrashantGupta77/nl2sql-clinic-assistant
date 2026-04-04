@@ -1,0 +1,10 @@
+vanna[sqlite]>=2.0.0
+fastapi
+uvicorn[standard]
+plotly
+pandas
+python-dotenv
+faker
+openai
+requests
+streamlit
