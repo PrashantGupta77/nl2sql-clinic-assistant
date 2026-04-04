@@ -6,13 +6,33 @@ This application allows users to ask questions in plain English and retrieve str
 
 ---
 
-## 🚀 Live Capabilities
+## 🚀 Live Demo
 
-* Convert natural language → SQL queries
-* Execute queries safely on a database
-* Return structured results (table + JSON)
-* Generate interactive charts automatically
-* Provide SQL transparency for debugging
+* 🌐 **Streamlit App:**
+  https://prashantgupta77-nl2sql-clinic-assistant-app-rb7pf6.streamlit.app/
+
+* ⚡ **FastAPI Docs:**
+  https://nl2sql-clinic-assistant-fastapi.onrender.com/docs
+
+* 📡 **Health Check:**
+  https://nl2sql-clinic-assistant-fastapi.onrender.com/health
+
+---
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://prashantgupta77-nl2sql-clinic-assistant-app-rb7pf6.streamlit.app/)
+
+---
+
+## 🚀 Key Features
+
+* Natural Language → SQL conversion using AI
+* Multi-table joins, aggregations, and filters
+* Safe SQL execution (SELECT-only validation)
+* Structured API responses (JSON + tables)
+* Automatic chart generation using Plotly
+* Interactive Streamlit dashboard
+* Query caching and performance optimization
+* Benchmark system with 20/20 queries passing
 
 ---
 
@@ -49,62 +69,25 @@ User (Streamlit UI / API Client)
 
 ---
 
-## ✨ Features
-
-### 🔹 Core Features
-
-* Natural Language → SQL conversion
-* Multi-table joins and aggregations
-* Automatic SQL execution
-* Structured API responses
-
-### 🔹 AI Capabilities
-
-* Vanna Agent with memory
-* Few-shot learning using seeded SQL examples
-* Deterministic fallback for known queries
-
-### 🔹 Backend Features
-
-* SQL validation (SELECT-only execution)
-* Error handling (invalid SQL, empty results)
-* Query caching (performance optimization)
-* Rate limiting (basic protection)
-* Input validation (security)
-
-### 🔹 Visualization
-
-* Automatic chart generation (Plotly)
-* Smart visualization selection
-
-### 🔹 UI (Streamlit)
-
-* Clean interactive dashboard
-* Query history tracking
-* SQL preview panel
-* Table + chart display
-
----
-
 ## 📁 Project Structure
 
 ```text
 project/
 │
-├── setup_database.py       # Create DB + insert dummy data
-├── seed_memory.py          # Seed agent memory
-├── vanna_setup.py          # Initialize Vanna agent
-├── main.py                 # FastAPI backend
-├── app.py        # Streamlit UI
-├── run_benchmark.py        # Benchmark runner
+├── setup_database.py       # Create SQLite database + generate dummy clinic data
+├── seed_memory.py          # Seed Vanna agent with verified NL → SQL examples
+├── vanna_setup.py          # Initialize Vanna agent, tools, and memory
+├── main.py                 # FastAPI backend (API endpoints, SQL execution)
+├── app.py                  # Streamlit UI (dashboard + user interaction)
+├── run_benchmark.py        # Automated benchmark runner (20 test queries)
 │
-├── clinic.db               # SQLite database
-├── seed_data.json          # Training examples
+├── clinic.db               # SQLite database file (pre-generated data)
+├── seed_data.json          # Stored training examples for agent memory
 │
-├── requirements.txt
-├── README.md
-├── RESULTS.md              # Benchmark results
-└── benchmark_results.json
+├── requirements.txt        # Python dependencies
+├── README.md               # Project documentation
+├── RESULTS.md              # Benchmark output report (auto-generated)
+└── benchmark_results.json  # Raw benchmark results (JSON format)
 ```
 
 ---
@@ -114,7 +97,7 @@ project/
 ### 1️⃣ Clone Repository
 
 ```bash
-git clone https://github.com/<your-username>/nl2sql-clinic-assistant.git
+git clone https://github.com/PrashantGupta77/nl2sql-clinic-assistant.git
 cd nl2sql-clinic-assistant
 ```
 
@@ -182,7 +165,7 @@ http://127.0.0.1:8000/docs
 ### 🔹 Start Frontend (Streamlit)
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run app.py
 ```
 
 ---
@@ -194,17 +177,6 @@ streamlit run streamlit_app.py
 ```json
 {
   "question": "Which doctor earns the most revenue?"
-}
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "sql_query": "...",
-  "rows": [...],
-  "chart": {...}
 }
 ```
 
@@ -233,8 +205,8 @@ python run_benchmark.py
 
 **20 / 20 Queries Passed**
 
-* All assignment queries handled correctly
-* Deterministic responses via seed matching
+* All assignment queries handled successfully
+* Deterministic responses using seeded SQL mapping
 
 ---
 
@@ -243,7 +215,8 @@ python run_benchmark.py
 * Only `SELECT` queries allowed
 * Dangerous SQL blocked:
 
-  * DROP, DELETE, UPDATE, ALTER
+  * INSERT, UPDATE, DELETE
+  * DROP, ALTER, TRUNCATE
 * Input validation enforced
 * Basic rate limiting enabled
 
@@ -251,13 +224,11 @@ python run_benchmark.py
 
 ## 🚀 Deployment
 
-### Recommended Setup
-
-| Component       | Platform         |
-| --------------- | ---------------- |
-| FastAPI Backend | Render / Railway |
-| Streamlit UI    | Streamlit Cloud  |
-| Database        | SQLite           |
+| Component       | Platform        |
+| --------------- | --------------- |
+| FastAPI Backend | Render          |
+| Streamlit UI    | Streamlit Cloud |
+| Database        | SQLite          |
 
 ---
 
@@ -265,7 +236,7 @@ python run_benchmark.py
 
 * Cache is in-memory (not persistent)
 * Rate limiting is basic
-* LLM may occasionally produce imperfect SQL
+* LLM may occasionally generate imperfect SQL for unseen queries
 
 ---
 
@@ -274,8 +245,8 @@ python run_benchmark.py
 * Redis caching
 * Authentication system
 * Multi-user support
-* Better SQL correction loop
-* Cloud DB (PostgreSQL)
+* Advanced SQL correction loop
+* PostgreSQL / cloud database support
 
 ---
 
@@ -290,8 +261,8 @@ python run_benchmark.py
 This project demonstrates:
 
 * End-to-end NL2SQL system design
-* LLM integration with backend APIs
-* Secure query execution
+* LLM-powered backend architecture
+* Secure and controlled SQL execution
 * Real-world dataset simulation
 * Benchmark-driven validation
 
