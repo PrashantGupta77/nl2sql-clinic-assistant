@@ -14,7 +14,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_API_BASE_URL = st.secrets.get(
+    "API_BASE_URL",
+    "http://127.0.0.1:8000"
+)
+
 SAMPLE_QUESTIONS = [
     "How many patients do we have?",
     "List all doctors and their specializations",
