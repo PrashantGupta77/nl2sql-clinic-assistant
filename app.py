@@ -16,7 +16,7 @@ st.set_page_config(
 
 DEFAULT_API_BASE_URL = st.secrets.get(
     "API_BASE_URL",
-    "http://127.0.0.1:8000"
+    "https://nl2sql-clinic-assistant-fastapi.onrender.com"
 )
 
 SAMPLE_QUESTIONS = [
