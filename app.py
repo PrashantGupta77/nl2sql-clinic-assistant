@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+import os
 from typing import Any
 
 import pandas as pd
@@ -14,10 +15,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DEFAULT_API_BASE_URL = st.secrets.get(
-    "API_BASE_URL",
-    "https://nl2sql-clinic-assistant-fastapi.onrender.com"
-)
+try:
+    DEFAULT_API_BASE_URL = st.secrets["API_BASE_URL"]
+except Exception:
+    DEFAULT_API_BASE_URL = os.getenv(
+        "API_BASE_URL",
+        "https://nl2sql-clinic-assistant-fastapi.onrender.com"
+    )
 
 SAMPLE_QUESTIONS = [
     "How many patients do we have?",
