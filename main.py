@@ -18,7 +18,7 @@ SEED_FILE = Path("seed_data.json")
 
 app = FastAPI(
     title="Clinic NL2SQL API",
-    version="1.3.0",
+    version="1.4.1",
     description="Natural Language to SQL API using Vanna 2.0, FastAPI, and SQLite",
 )
 
@@ -59,7 +59,6 @@ BLOCKED_SYSTEM_REFS = [
 ]
 
 KNOWN_QUERY_ALIASES: dict[str, str] = {
-    # busiest day
     "what is the busiest day": "show the busiest day of the week for appointments",
     "which is the busiest day": "show the busiest day of the week for appointments",
     "which day is the busiest": "show the busiest day of the week for appointments",
@@ -67,13 +66,9 @@ KNOWN_QUERY_ALIASES: dict[str, str] = {
     "show busiest day": "show the busiest day of the week for appointments",
     "what is the busiest day of the week": "show the busiest day of the week for appointments",
     "which is the busiest day of the week": "show the busiest day of the week for appointments",
-
-    # least appointments
     "which doctor has the least appointments": "which doctor has the least number of appointments",
     "doctor with least appointments": "which doctor has the least number of appointments",
     "least busy doctor": "which doctor has the least number of appointments",
-
-    # completed appointments variants
     "which day has the most completed appointments": "which day of the week has the highest number of completed appointments",
     "busiest day for completed appointments": "which day of the week has the highest number of completed appointments",
 }
@@ -135,7 +130,7 @@ class ChatResponse(BaseModel):
 
 def normalize_question(text: str) -> str:
     text = text.strip().lower()
-    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"\s+", " ", text)
     return text
 
@@ -199,6 +194,33 @@ def resolve_shortcut_sql(question: str) -> tuple[Optional[str], Optional[str]]:
         return RULE_BASED_SQL[normalized_question], "rule_based_match"
 
     return None, None
+
+
+def normalize_sql_literals(sql: str) -> str:
+    replacements = {
+        "'cancelled'": "'Cancelled'",
+        "'completed'": "'Completed'",
+        "'scheduled'": "'Scheduled'",
+        "'no-show'": "'No-Show'",
+        "'noshow'": "'No-Show'",
+        "'paid'": "'Paid'",
+        "'pending'": "'Pending'",
+        "'overdue'": "'Overdue'",
+    }
+
+    normalized_sql = sql
+    for old, new in replacements.items():
+        normalized_sql = re.sub(
+            re.escape(old),
+            new,
+            normalized_sql,
+            flags=re.IGNORECASE,
+        )
+    return normalized_sql
+
+
+def finalize_sql(sql: str) -> str:
+    return normalize_sql_literals(sql)
 
 
 def validate_sql(sql: str) -> tuple[bool, str]:
@@ -358,10 +380,15 @@ Do not include bullets, comments, or prose.
 Database schema:
 {schema_context_cache}
 
+Allowed categorical values:
+- appointments.status: Scheduled, Completed, Cancelled, No-Show
+- invoices.status: Paid, Pending, Overdue
+
 Important constraints:
 - Use only SQLite-compatible SQL.
 - Use only SELECT queries.
 - Prefer existing table and column names exactly as given.
+- Use the exact categorical values listed above when needed.
 - If grouping by weekday, use strftime('%w', appointment_date).
 - If the user asks about busiest day, compute weekday from appointments.
 
@@ -403,6 +430,10 @@ Only SQL starting with SELECT and ending with semicolon.
 
 Schema:
 {schema_context_cache}
+
+Allowed values:
+- appointments.status: Scheduled, Completed, Cancelled, No-Show
+- invoices.status: Paid, Pending, Overdue
 
 Question: {question}
 """.strip()
@@ -519,6 +550,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         # 1) Exact, alias, or rule-based shortcut
         shortcut_sql, shortcut_source = resolve_shortcut_sql(question)
         if shortcut_sql:
+            shortcut_sql = finalize_sql(shortcut_sql)
+
             is_valid, validation_error = validate_sql(shortcut_sql)
             if not is_valid:
                 return ChatResponse(
@@ -567,6 +600,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 error="No SQL query found in agent response",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
+
+        sql_query = finalize_sql(sql_query)
 
         is_valid, validation_error = validate_sql(sql_query)
         if not is_valid:
