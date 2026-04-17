@@ -18,7 +18,7 @@ SEED_FILE = Path("seed_data.json")
 
 app = FastAPI(
     title="Clinic NL2SQL API",
-    version="1.0.0",
+    version="1.3.0",
     description="Natural Language to SQL API using Vanna 2.0, FastAPI, and SQLite",
 )
 
@@ -26,10 +26,93 @@ agent = None
 query_cache: dict[str, dict[str, Any]] = {}
 rate_limit_store: dict[str, list[float]] = {}
 known_question_sql_map: dict[str, str] = {}
+schema_context_cache: str = ""
 
 MAX_QUESTION_LENGTH = 300
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 20
+MAX_CACHE_ITEMS = 100
+
+BLOCKED_KEYWORDS = [
+    "insert",
+    "update",
+    "delete",
+    "drop",
+    "alter",
+    "exec",
+    "xp_",
+    "sp_",
+    "grant",
+    "revoke",
+    "shutdown",
+    "truncate",
+    "attach",
+    "detach",
+    "create",
+    "replace",
+]
+
+BLOCKED_SYSTEM_REFS = [
+    "sqlite_master",
+    "sqlite_temp_master",
+    "pragma",
+]
+
+KNOWN_QUERY_ALIASES: dict[str, str] = {
+    # busiest day
+    "what is the busiest day": "show the busiest day of the week for appointments",
+    "which is the busiest day": "show the busiest day of the week for appointments",
+    "which day is the busiest": "show the busiest day of the week for appointments",
+    "busiest day": "show the busiest day of the week for appointments",
+    "show busiest day": "show the busiest day of the week for appointments",
+    "what is the busiest day of the week": "show the busiest day of the week for appointments",
+    "which is the busiest day of the week": "show the busiest day of the week for appointments",
+
+    # least appointments
+    "which doctor has the least appointments": "which doctor has the least number of appointments",
+    "doctor with least appointments": "which doctor has the least number of appointments",
+    "least busy doctor": "which doctor has the least number of appointments",
+
+    # completed appointments variants
+    "which day has the most completed appointments": "which day of the week has the highest number of completed appointments",
+    "busiest day for completed appointments": "which day of the week has the highest number of completed appointments",
+}
+
+RULE_BASED_SQL: dict[str, str] = {
+    "which doctor has the least number of appointments": """
+        SELECT d.name, COUNT(*) AS appointment_count
+        FROM appointments a
+        JOIN doctors d ON a.doctor_id = d.id
+        GROUP BY d.id, d.name
+        ORDER BY appointment_count ASC, d.name ASC
+        LIMIT 1;
+    """.strip(),
+    "which doctor has the least appointments": """
+        SELECT d.name, COUNT(*) AS appointment_count
+        FROM appointments a
+        JOIN doctors d ON a.doctor_id = d.id
+        GROUP BY d.id, d.name
+        ORDER BY appointment_count ASC, d.name ASC
+        LIMIT 1;
+    """.strip(),
+    "which day of the week has the highest number of completed appointments": """
+        SELECT CASE strftime('%w', appointment_date)
+                   WHEN '0' THEN 'Sunday'
+                   WHEN '1' THEN 'Monday'
+                   WHEN '2' THEN 'Tuesday'
+                   WHEN '3' THEN 'Wednesday'
+                   WHEN '4' THEN 'Thursday'
+                   WHEN '5' THEN 'Friday'
+                   WHEN '6' THEN 'Saturday'
+               END AS weekday,
+               COUNT(*) AS total_completed_appointments
+        FROM appointments
+        WHERE status = 'Completed'
+        GROUP BY weekday
+        ORDER BY total_completed_appointments DESC
+        LIMIT 1;
+    """.strip(),
+}
 
 
 class ChatRequest(BaseModel):
@@ -52,6 +135,7 @@ class ChatResponse(BaseModel):
 
 def normalize_question(text: str) -> str:
     text = text.strip().lower()
+    text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"\s+", " ", text)
     return text
 
@@ -72,42 +156,66 @@ def load_known_question_sql_map() -> dict[str, str]:
     return mapping
 
 
+def get_schema_context() -> str:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        tables = cursor.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name;
+            """
+        ).fetchall()
+
+        schema_lines: list[str] = []
+        for (table_name,) in tables:
+            columns = cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+            col_parts = [f"{col[1]} {col[2]}" for col in columns]
+            schema_lines.append(f"{table_name}({', '.join(col_parts)})")
+
+        return "\n".join(schema_lines)
+    finally:
+        conn.close()
+
+
+def resolve_shortcut_sql(question: str) -> tuple[Optional[str], Optional[str]]:
+    normalized_question = normalize_question(question)
+
+    if normalized_question in known_question_sql_map:
+        return known_question_sql_map[normalized_question], "verified_seed_match"
+
+    aliased_question = KNOWN_QUERY_ALIASES.get(normalized_question)
+    if aliased_question:
+        normalized_alias = normalize_question(aliased_question)
+        if normalized_alias in known_question_sql_map:
+            return known_question_sql_map[normalized_alias], "alias_seed_match"
+        if normalized_alias in RULE_BASED_SQL:
+            return RULE_BASED_SQL[normalized_alias], "alias_rule_match"
+
+    if normalized_question in RULE_BASED_SQL:
+        return RULE_BASED_SQL[normalized_question], "rule_based_match"
+
+    return None, None
+
+
 def validate_sql(sql: str) -> tuple[bool, str]:
     normalized = sql.strip().lower()
     normalized = re.sub(r"\s+", " ", normalized)
 
-    blocked_keywords = [
-        "insert",
-        "update",
-        "delete",
-        "drop",
-        "alter",
-        "exec",
-        "xp_",
-        "sp_",
-        "grant",
-        "revoke",
-        "shutdown",
-        "truncate",
-        "attach",
-        "detach",
-        "create",
-        "replace",
-    ]
-
     if not normalized.startswith("select"):
         return False, "Only SELECT queries are allowed."
 
-    for keyword in blocked_keywords:
-        if keyword in normalized:
+    if normalized.count(";") > 1:
+        return False, "Multiple SQL statements are not allowed."
+
+    for keyword in BLOCKED_KEYWORDS:
+        if re.search(rf"\b{re.escape(keyword)}\b", normalized):
             return False, f"Blocked SQL keyword detected: {keyword}"
 
-    blocked_system_refs = [
-        "sqlite_master",
-        "sqlite_temp_master",
-        "pragma",
-    ]
-    for item in blocked_system_refs:
+    for item in BLOCKED_SYSTEM_REFS:
         if item in normalized:
             return False, f"System table or command not allowed: {item}"
 
@@ -132,22 +240,42 @@ def extract_sql(text: str) -> Optional[str]:
     if not text:
         return None
 
-    sql_block_match = re.search(r"```sql\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
-    if sql_block_match:
-        return sql_block_match.group(1).strip()
+    patterns = [
+        r"```sql\s*(.*?)```",
+        r"```\s*(select .*?)```",
+        r"(select\s+.*?;)",
+        r"(select\s+.*)$",
+    ]
 
-    generic_block_match = re.search(r"```\s*(select .*?)```", text, flags=re.IGNORECASE | re.DOTALL)
-    if generic_block_match:
-        return generic_block_match.group(1).strip()
-
-    select_statement_match = re.search(r"(select\s+.*?;)", text, flags=re.IGNORECASE | re.DOTALL)
-    if select_statement_match:
-        return select_statement_match.group(1).strip()
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            candidate = match.group(1).strip()
+            candidate = re.sub(r"^sql\s*", "", candidate, flags=re.IGNORECASE).strip()
+            if candidate.lower().startswith("select"):
+                if not candidate.endswith(";"):
+                    candidate += ";"
+                return candidate
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    sql_lines: list[str] = []
+    started = False
+
     for line in lines:
-        if line.lower().startswith("select "):
-            return line
+        lower_line = line.lower()
+        if lower_line.startswith("select "):
+            started = True
+        if started:
+            sql_lines.append(line)
+            if line.endswith(";"):
+                break
+
+    if sql_lines:
+        candidate = " ".join(sql_lines).strip()
+        if candidate.lower().startswith("select"):
+            if not candidate.endswith(";"):
+                candidate += ";"
+            return candidate
 
     return None
 
@@ -175,7 +303,7 @@ def choose_chart_type(columns: list[str], rows: list[list[Any]]) -> tuple[Option
             fig = px.line(df, x=x_col, y=y_col, title=f"{y_col} over {x_col}")
             return json.loads(fig.to_json()), "line"
 
-        if any(word in x_lower for word in ["status", "gender", "department", "specialization", "city"]) and df[x_col].nunique() <= 10:
+        if any(word in x_lower for word in ["status", "gender", "department", "specialization", "city", "weekday"]) and df[x_col].nunique() <= 12:
             fig = px.bar(df, x=x_col, y=y_col, title=f"{y_col} by {x_col}")
             return json.loads(fig.to_json()), "bar"
 
@@ -209,9 +337,77 @@ def enforce_rate_limit(client_key: str) -> None:
     rate_limit_store[client_key] = request_times
 
 
+def save_to_cache(cache_key: str, response: ChatResponse) -> None:
+    if len(query_cache) >= MAX_CACHE_ITEMS:
+        oldest_key = next(iter(query_cache))
+        query_cache.pop(oldest_key, None)
+    query_cache[cache_key] = response.model_dump()
+
+
 async def collect_agent_response(question: str) -> str:
     context = RequestContext()
-    stream = agent.send_message(context, question)
+
+    prompt = f"""
+You are generating SQL for a SQLite clinic database.
+
+Return exactly one valid SQLite SELECT query and nothing else.
+Do not use markdown.
+Do not explain anything.
+Do not include bullets, comments, or prose.
+
+Database schema:
+{schema_context_cache}
+
+Important constraints:
+- Use only SQLite-compatible SQL.
+- Use only SELECT queries.
+- Prefer existing table and column names exactly as given.
+- If grouping by weekday, use strftime('%w', appointment_date).
+- If the user asks about busiest day, compute weekday from appointments.
+
+Question: {question}
+""".strip()
+
+    stream = agent.send_message(context, prompt)
+
+    collected_parts: list[str] = []
+
+    async for chunk in stream:
+        if hasattr(chunk, "simple_component") and chunk.simple_component:
+            text = getattr(chunk.simple_component, "text", None)
+            if text:
+                cleaned = text.strip()
+                if not cleaned:
+                    continue
+                if "Tool completed" in cleaned:
+                    continue
+                if "Results saved" in cleaned:
+                    continue
+                if "IMPORTANT: FOR VISUALIZE_DATA" in cleaned:
+                    continue
+                collected_parts.append(cleaned)
+
+    raw_text = "\n".join(collected_parts).strip()
+    return raw_text
+
+
+async def collect_agent_response_retry(question: str) -> str:
+    context = RequestContext()
+
+    prompt = f"""
+Return only one SQLite SELECT query for this question.
+No markdown.
+No explanation.
+No prose.
+Only SQL starting with SELECT and ending with semicolon.
+
+Schema:
+{schema_context_cache}
+
+Question: {question}
+""".strip()
+
+    stream = agent.send_message(context, prompt)
 
     collected_parts: list[str] = []
 
@@ -265,10 +461,11 @@ def build_success_response(
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    global agent, known_question_sql_map
+    global agent, known_question_sql_map, schema_context_cache
 
     save_seed_examples_to_file()
     known_question_sql_map = load_known_question_sql_map()
+    schema_context_cache = get_schema_context()
 
     agent = create_vanna_agent()
     hydrated_count = await hydrate_agent_memory(agent, verbose=False)
@@ -319,47 +516,50 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     start_time = time.time()
 
     try:
-        # 1) Exact known-question shortcut
-        if cache_key in known_question_sql_map:
-            sql_query = known_question_sql_map[cache_key]
-
-            is_valid, validation_error = validate_sql(sql_query)
+        # 1) Exact, alias, or rule-based shortcut
+        shortcut_sql, shortcut_source = resolve_shortcut_sql(question)
+        if shortcut_sql:
+            is_valid, validation_error = validate_sql(shortcut_sql)
             if not is_valid:
                 return ChatResponse(
                     success=False,
-                    message="Known SQL failed validation.",
-                    sql_query=sql_query,
+                    message="Shortcut SQL failed validation.",
+                    sql_query=shortcut_sql,
                     error=validation_error,
                     execution_time_ms=int((time.time() - start_time) * 1000),
                 )
 
-            columns, rows = execute_sql(sql_query)
+            columns, rows = execute_sql(shortcut_sql)
             response = build_success_response(
                 question=question,
-                sql_query=sql_query,
+                sql_query=shortcut_sql,
                 columns=columns,
                 rows=rows,
-                source="verified_seed_match",
+                source=shortcut_source or "verified_seed_match",
                 start_time=start_time,
             )
-            query_cache[cache_key] = response.model_dump()
+            save_to_cache(cache_key, response)
             return response
 
         # 2) Agent path for non-seeded questions
         agent_response = await collect_agent_response(question)
-        print("\n--- RAW AGENT RESPONSE ---")
+
+        print("\n--- RAW AGENT RESPONSE (ATTEMPT 1) ---")
         print(agent_response if agent_response else "[EMPTY RESPONSE]")
         print("--- END RAW AGENT RESPONSE ---\n")
 
-        if not agent_response:
-            return ChatResponse(
-                success=False,
-                message="The AI did not return any response.",
-                error="Empty agent response",
-                execution_time_ms=int((time.time() - start_time) * 1000),
-            )
-
         sql_query = extract_sql(agent_response)
+
+        # 3) Retry once with stricter prompt if extraction fails
+        if not sql_query:
+            retry_response = await collect_agent_response_retry(question)
+
+            print("\n--- RAW AGENT RESPONSE (ATTEMPT 2) ---")
+            print(retry_response if retry_response else "[EMPTY RESPONSE]")
+            print("--- END RAW AGENT RESPONSE ---\n")
+
+            sql_query = extract_sql(retry_response)
+
         if not sql_query:
             return ChatResponse(
                 success=False,
@@ -388,7 +588,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             start_time=start_time,
         )
 
-        query_cache[cache_key] = response.model_dump()
+        save_to_cache(cache_key, response)
         return response
 
     except sqlite3.Error as exc:
